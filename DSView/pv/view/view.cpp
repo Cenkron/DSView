@@ -233,7 +233,14 @@ void View::capture_init(bool instant)
 
 void View::zoom(double steps)
 {
-    zoom(steps, get_view_width() / 2);
+// Cenkron - changed for the LOGIC to zoom around the hover_point when possible, 
+    if (_session.get_device()->dev_inst()->mode != DSO
+	&&  hover_point().y() > 0
+	&&  hover_point().x() > 0
+	&&  hover_point().x() <get_view_width())
+	    zoom(steps, hover_point().x());		// LOGIC mode and hover_point is valid
+	else
+        zoom(steps, get_view_width() / 2);
 }
 
 void View::set_update(Viewport *viewport, bool need_update)
@@ -468,14 +475,18 @@ void View::receive_end()
 
 void View::receive_trigger(quint64 trig_pos)
 {
-    const double time = trig_pos * 1.0 / _session.cur_samplerate();
     _trig_cursor->set_index(trig_pos);
-    if (ds_trigger_get_en() ||
-        _session.get_device()->name() == "virtual-session" ||
-        _session.get_device()->dev_inst()->mode == DSO) {
+    if (ds_trigger_get_en()
+    ||  _session.get_device()->name() == "virtual-session"
+    ||  _session.get_device()->dev_inst()->mode == DSO) {
         _show_trig_cursor = true;
-        set_scale_offset(_scale,  (time / _scale) - (get_view_width() / 2));
+// Cenkron - changed for the LOGIC to not reset the view to the trigger point
+        if (_session.get_device()->dev_inst()->mode == DSO) {
+            const double time = trig_pos * 1.0 / _session.cur_samplerate();
+            set_scale_offset(_scale,  (time / _scale) - (get_view_width() / 2));
+        }
     }
+    
 
     _ruler->update();
     viewport_update();

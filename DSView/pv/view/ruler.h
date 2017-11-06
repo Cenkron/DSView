@@ -39,6 +39,7 @@ class Ruler : public QWidget
 
 private:
 	static const int MinorTickSubdivision;
+	static const int MinorTickSubdivisions[3];
 	static const int ScaleUnits[3];
     static const int MinPeriodScale;
 
@@ -86,8 +87,9 @@ private:
     void leaveEvent(QEvent *);
 
 private:
-    void draw_tick_mark(QPainter &p);
-    void draw_logic_tick_mark(QPainter &p);
+//Cenkron: These two methods should probably be re-merged eventually.
+    void draw_tick_marks(QPainter &p);
+    void draw_logic_tick_marks(QPainter &p);
 	/**
 	 * Draw a hover arrow under the cursor position.
 	 */

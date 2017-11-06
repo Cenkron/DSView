@@ -48,9 +48,12 @@ using namespace std;
 namespace pv {
 namespace view {
 
-const int Ruler::MinorTickSubdivision = 4;
+const int MinorTickSubdivision = 10;
 const int Ruler::ScaleUnits[3] = {1, 2, 5};
+const int Ruler::MinorTickSubdivisions[3] = {10, 5, 10};
+
 const int Ruler::MinPeriodScale = 10;
+
 
 const QString Ruler::SIPrefixes[9] =
 	{"f", "p", "n", QChar(0x03BC), "m", "", "k", "M", "G"};
@@ -187,8 +190,12 @@ void Ruler::paintEvent(QPaintEvent*)
     //QPainter p(this);
     //p.setRenderHint(QPainter::Antialiasing);
 
-    // Draw tick mark
-    draw_logic_tick_mark(p);
+    // Draw tick marks
+    if (_view.session().get_device()->dev_inst()->mode == DSO)
+        draw_logic_tick_marks(p);
+    else
+        draw_tick_marks(p);
+// Cenkron: Probably, the two method names above should be swapped
 
     p.setRenderHint(QPainter::Antialiasing);
 	// Draw the hover mark
@@ -332,92 +339,121 @@ void Ruler::mouseReleaseEvent(QMouseEvent *event)
     }
 }
 
-void Ruler::draw_tick_mark(QPainter &p)
+// Cenkron: Currently, this one is used for the LOGIC.  They should probably be re-merged eventually.
+
+void Ruler::draw_tick_marks(QPainter &p)
 {
     using namespace Qt;
 
-    const double SpacingIncrement = 32.0;
-    const double MinValueSpacing = 16.0;
-    const int ValueMargin = 15;
+    const double FieldSpacingFactor = 1.7;					// dimensionless
+    const int ValueMargin           = 5;					// pixels
 
-    double min_width = SpacingIncrement, typical_width;
-    double tick_period;
-    unsigned int prefix;
+    double  view_scale  = _view.scale();					// seconds / pixel
+    double  view_offset = _view.offset();					// pixels
+    int     view_width  = _view.get_view_width();			// pixels
+    double  view_widthd = static_cast<double>(view_width);	// seconds
+    double  t0          = view_scale * view_offset;			// seconds
 
-    // Find tick spacing, and number formatting that does not cause
-    // value to collide.
-    do
+	// For compatibility with the other version
+    const double abs_min_period = 10.0 / _view.session().cur_samplerate();
+    double  min_width = 32.0;
+    const   uint64_t cur_period_scale = ceil((view_scale * min_width) / abs_min_period);
+    _min_period = cur_period_scale * abs_min_period;
+	// End compatibility with the other version
+
+	int     MinorTickSubdivision;							// index
+    double  major_tick_period;								// pixels
+    unsigned int prefix;									// index
+
+    // Find major tick spacing, and number formatting that does not cause values to collide.
+
+    double base_period   = 0.5 * view_scale * view_width;						// Start with half of the current span
+    int    order         = ceil(log10f(base_period));							// Get the log10 magnitude
+		   base_period   = pow(10.0, static_cast<double>(order));				// Refine the initial trial base
+    int    unit          = 0;													// Start with full size
+
+	major_tick_period    = base_period;											// Prevent uninitialized variable warning
+	prefix               = ceil((order - FirstSIPrefixPower) / 3.0f);
+	MinorTickSubdivision = MinorTickSubdivisions[0];
+
+ for (;;)
     {
-        _min_period = _view.scale() * min_width;
+        double trial_period = base_period / ScaleUnits[unit];					// Scale down by 1,2,5
+	    int    order         = ceil(log10f(base_period));						// Get the log10 magnitude
+	    int    trial_prefix  = ceil((order - FirstSIPrefixPower) / 3.0f);	// Set the prefix for the trial base
+        double typical_width = ((p.boundingRect(0, 0, INT_MAX, INT_MAX, AlignLeft | AlignTop,
+							    format_time(t0, trial_prefix, 3)).width()) * view_scale * FieldSpacingFactor);
 
-        //const int order = (int)floorf(log10f(_min_period));
-        const int order = ceil(log10f(_min_period));
-        const double order_decimal = pow(10.0, static_cast<double>(order));
+        if (trial_period < typical_width)
+			break;
 
-        unsigned int unit = 0;
+		// Record last acceptable legend plan
 
-        do
-        {
-            tick_period = order_decimal * ScaleUnits[unit++];
-        } while (tick_period < _min_period && unit < countof(ScaleUnits));
+		major_tick_period = trial_period;
+		prefix            = trial_prefix;
+		MinorTickSubdivision = MinorTickSubdivisions[unit];
 
-        prefix = ceil((order - FirstSIPrefixPower) / 3.0f);
-        assert(prefix < countof(SIPrefixes));
+		if (++unit >= 3)
+		{
+			unit = 0;
+			base_period *= 0.1;
+		}
+	}
+    _cur_prefix = prefix;
 
-
-        typical_width = p.boundingRect(0, 0, INT_MAX, INT_MAX,
-            AlignLeft | AlignTop, format_time(_view.offset() * _view.scale(),
-            prefix)).width() + MinValueSpacing;
-
-        min_width += SpacingIncrement;
-
-    } while(typical_width > tick_period / _view.scale());
-
-    const int text_height = p.boundingRect(0, 0, INT_MAX, INT_MAX,
-        AlignLeft | AlignTop, "8").height();
+	const int text_height = p.boundingRect(0, 0, INT_MAX, INT_MAX,
+		AlignLeft | AlignTop, "8").height();
 
     // Draw the tick marks
+
     p.setPen(dsBlue);
 
-    const double minor_tick_period = tick_period / MinorTickSubdivision;
-    const double first_major_division =
-        floor(_view.offset() * _view.scale() / tick_period);
-    const double first_minor_division =
-        ceil(_view.offset() * _view.scale() / minor_tick_period);
-    const double t0 = first_major_division * tick_period;
+    const double minor_tick_period    = major_tick_period / MinorTickSubdivision;
+    const double first_minor_division = ceil(t0 / minor_tick_period);
+    const double first_major_division = ceil(t0 / major_tick_period);
 
-    int division = (int)round(first_minor_division -
-        first_major_division * MinorTickSubdivision) - 1;
+    const int tick_y2        = height();
+    const int major_tick_y1  = text_height + ValueMargin * 3;
+    const int minor_tick_y1  = (major_tick_y1 + tick_y2) / 2;
+    const int middle_tick_y1 = (major_tick_y1 + minor_tick_y1) / 2;
 
-    const int major_tick_y1 = text_height + ValueMargin * 3;
-    const int tick_y2 = height();
-    const int minor_tick_y1 = (major_tick_y1 + tick_y2) / 2;
+    int    x; // Pixel index
+    double t = first_minor_division * minor_tick_period;
+    int    divisionIndex = (((int)(
+				round(first_minor_division - (first_major_division * MinorTickSubdivision)))
+				+ MinorTickSubdivision) % MinorTickSubdivision);
 
-    double x;
+    for (;;)
+    {
+        x = (int)(t / view_scale) - view_offset;
+		if (x >= view_width)
+			break;
 
-    do {
-        const double t = t0 + division * minor_tick_period;
-        x = t / _view.scale() - _view.offset();
-
-        if (division % MinorTickSubdivision == 0)
+        if (divisionIndex == 0)
         {
-            // Draw a major tick
-            p.drawText(x, 2 * ValueMargin, 0, text_height,
-                AlignCenter | AlignTop | TextDontClip,
-                format_time(t, prefix));
-            p.drawLine(QPointF(x, major_tick_y1),
-                QPointF(x, tick_y2));
+            // Ensure the major tick mark legend is positioned within the ruler region
+			double textHalfWidth = ((p.boundingRect(0, 0, INT_MAX, INT_MAX,
+				AlignLeft | AlignTop, format_time(t, prefix, 3)).width() / 2) + 2);
+			int    text_pos = max((int)(textHalfWidth), min((int)(view_widthd - textHalfWidth), x));
+
+            // Draw the major tick mark legend
+			p.drawText(text_pos, 2 * ValueMargin, 0, text_height,
+				AlignCenter | AlignTop | TextDontClip,
+				format_time(t, prefix, 3));
+
+            // Draw the major tick mark
+            p.drawLine(QPointF(x, major_tick_y1), QPointF(x, tick_y2));
         }
         else
         {
-            // Draw a minor tick
-            p.drawLine(QPointF(x, minor_tick_y1),
-                QPointF(x, tick_y2));
+            // Draw a minor tick mark
+			int tick = (divisionIndex == 5) ? middle_tick_y1 : minor_tick_y1;
+			p.drawLine(QPointF(x, tick), QPointF(x, tick_y2));
         }
 
-        division++;
-
-    } while (x < _view.get_view_width());
+        divisionIndex = ((divisionIndex  + 1) % MinorTickSubdivision);
+        t += minor_tick_period;
+    }
 
     // Draw the cursors
     if (!_view.get_cursorList().empty()) {
@@ -429,9 +465,18 @@ void Ruler::draw_tick_mark(QPainter &p)
             i++;
         }
     }
+    if (_view.trig_cursor_shown()) {
+        _view.get_trig_cursor()->paint_fix_label(p, rect(), prefix, 'T', _view.get_trig_cursor()->colour());
+    }
+    if (_view.search_cursor_shown()) {
+        _view.get_search_cursor()->paint_fix_label(p, rect(), prefix, 'S', _view.get_search_cursor()->colour());
+    }
 }
 
-void Ruler::draw_logic_tick_mark(QPainter &p)
+
+// Cenkron: Currently, this one is used for the DSO.  They should probably be re-merged eventually.
+
+void Ruler::draw_logic_tick_marks(QPainter &p)
 {
     using namespace Qt;
 
@@ -440,34 +485,35 @@ void Ruler::draw_logic_tick_mark(QPainter &p)
     const int ValueMargin = 5;
     const double abs_min_period = 10.0 / _view.session().cur_samplerate();
 
-    double min_width = SpacingIncrement;
-    double typical_width;
-    double tick_period = 0;
-    double scale = _view.scale();
-    int64_t offset = _view.offset();
-
-    const uint64_t cur_period_scale = ceil((scale * min_width) / abs_min_period);
+    double  min_width = SpacingIncrement;
+    double  typical_width;
+    double  tick_period  = 0;
+    double  view_scale   = _view.scale();
+    int     view_width   = _view.get_view_width();
+    double  view_widthd  = static_cast<double>(view_width);
+    int64_t view_offset  = _view.offset();
+    double  delta_t      = view_scale * view_widthd;
+    const   uint64_t cur_period_scale = ceil((view_scale * min_width) / abs_min_period);
 
     // Find tick spacing, and number formatting that does not cause
-    // value to collide.
+    // values to collide.
     if (_view.session().get_device()->dev_inst()->mode == DSO) {
         _min_period = _view.session().get_device()->get_time_base() * std::pow(10.0, -9.0);
     } else {
         _min_period = cur_period_scale * abs_min_period;
     }
-    const int order = (int)floorf(log10f(scale * _view.get_view_width()));
+    const int order = (int)floorf(log10f(delta_t));
     //const double order_decimal = pow(10, order);
     const unsigned int prefix = (order - FirstSIPrefixPower) / 3;
     _cur_prefix = prefix;
     assert(prefix < countof(SIPrefixes));
     typical_width = p.boundingRect(0, 0, INT_MAX, INT_MAX,
-        AlignLeft | AlignTop, format_time(offset * scale,
+        AlignLeft | AlignTop, format_time(view_offset * view_scale,
         prefix)).width() + MinValueSpacing;
     do
     {
         tick_period += _min_period;
-
-    } while(typical_width > tick_period / scale);
+    } while (typical_width > tick_period / view_scale);
 
     const int text_height = p.boundingRect(0, 0, INT_MAX, INT_MAX,
         AlignLeft | AlignTop, "8").height();
@@ -482,9 +528,9 @@ void Ruler::draw_logic_tick_mark(QPainter &p)
     assert(minor_prefix < countof(SIPrefixes));
 
     const double first_major_division =
-        floor(offset * scale / tick_period);
+        floor(view_offset * view_scale / tick_period);
     const double first_minor_division =
-        floor(offset * scale / minor_tick_period + 1);
+        floor(view_offset * view_scale / minor_tick_period + 1);
     const double t0 = first_major_division * tick_period;
 
     int division = (int)round(first_minor_division -
@@ -504,7 +550,7 @@ void Ruler::draw_logic_tick_mark(QPainter &p)
         const double t = t0 + division * minor_tick_period;
         const double major_t = t0 + floor(division / MinPeriodScale) * tick_period;
 
-        x = t / scale - offset;
+        x = t / view_scale - view_offset;
 
         if (division % MinPeriodScale == 0)
         {
@@ -518,13 +564,13 @@ void Ruler::draw_logic_tick_mark(QPainter &p)
         else
         {
             // Draw a minor tick
-            if (minor_tick_period / scale > 2 * typical_width)
+            if (minor_tick_period / view_scale > 2 * typical_width)
                 p.drawText(x, 2 * ValueMargin, 0, text_height,
                     AlignCenter | AlignTop | TextDontClip,
                     format_time(t, prefix));
-            //else if ((tick_period / scale > width() / 4) && (minor_tick_period / scale > inc_text_width))
-            else if (minor_tick_period / scale > 1.1 * inc_text_width ||
-                     tick_period / scale > _view.get_view_width())
+            //else if ((tick_period / view_scale > width() / 4) && (minor_tick_period / view_scale > inc_text_width))
+            else if (minor_tick_period / view_scale > 1.1 * inc_text_width ||
+                     tick_period / view_scale > view_widthd)
                 p.drawText(x, 2 * ValueMargin, 0, minor_tick_y1 + ValueMargin,
                     AlignCenter | AlignTop | TextDontClip,
                     format_time(t - major_t, minor_prefix));
@@ -534,7 +580,7 @@ void Ruler::draw_logic_tick_mark(QPainter &p)
 
         division++;
 
-    } while (x < _view.get_view_width());
+    } while (x < view_width);
 
     // Draw the cursors
     if (!_view.get_cursorList().empty()) {
