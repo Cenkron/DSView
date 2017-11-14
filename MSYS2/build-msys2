@@ -1,0 +1,231 @@
+#!/bin/bash
+##
+## This file is part of the DSView project.
+##
+## Copyright (C) 2016 Uwe Hermann <uwe@hermann-uwe.de>
+##
+## This program is free software; you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation; either version 2 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, see <http://www.gnu.org/licenses/>.
+##
+
+# -----------------------------------------------------------------------------
+# Location and Build type independent definitions
+# -----------------------------------------------------------------------------
+
+set -e
+
+# Edit this to 1/0 to enable/disable debug builds.
+DEBUG=0
+
+# The build target: "i686" (32bit) or "x86_64" (64bit).
+TARGET="x86_64"
+
+# Edit this to control verbose build output for DSView.
+#CMVB="-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON"
+CMVB="-DCMAKE_VERBOSE_MAKEFILE:BOOL=OFF"
+
+# Include this (or not) to control verbose build output for the two SIGROK directories.
+#VB="-v"
+VB=""
+
+# Edit this to enable/disable/modify parallel compiles.
+PARALLEL="-j 2"
+
+# You usually don't need to change anything below this line.
+
+# -----------------------------------------------------------------------------
+# Prepare the required packages
+# -----------------------------------------------------------------------------
+
+W="mingw-w64-$TARGET"
+
+if [ "x$1" = "xprepare" ]; then
+	# Update package list, install/update all requirements.
+	pacman -Sy
+	pacman -S \
+		autoconf automake libtool make pkg-config wget patch \
+		$W-cmake $W-swig $W-toolchain $W-glib2 $W-glibmm $W-libusb \
+		$W-check $W-boost $W-libzip $W-doxygen $W-qt5 $W-fftw \
+		$W-python3 $W-python3-numpy $W-python3-gobject $W-python3-setuptools 
+	exit
+fi
+
+# -----------------------------------------------------------------------------
+# Resolve the build path and build type
+# -----------------------------------------------------------------------------
+
+# Move back to the root directory of the DSView git repository.
+cd ..
+CWD="$PWD"
+BASEDIR=$CWD			# Convert it to an absolute path
+SOURCEDIR="$BASEDIR"	# This also the source root directory
+
+# Configure the build type and build root directory (out of source).
+if (($DEBUG > 0)); then
+	BUILD_TYPE="Debug"
+	BUILDDIR="$BASEDIR/msys2-debug"$
+else
+	BUILD_TYPE="Release"
+	BUILDDIR="$BASEDIR/msys2-release"
+fi
+
+# Configure the cmake parameter for the build type.
+
+CMBLD=" -DCMAKE_BUILD_TYPE=$BUILD_TYPE"
+
+# -----------------------------------------------------------------------------
+# Force a clean and rebuild by deleting the build directory, if any
+# -----------------------------------------------------------------------------
+
+echo Cleaning the build directory
+if [ "x$1" = "xclean" ]; then
+	rm -rf $BUILDDIR
+fi
+
+# -----------------------------------------------------------------------------
+# Prepare the build directory
+# -----------------------------------------------------------------------------
+
+# Create the build directory if it does not exist.
+[ ! -f $BUILDDIR ] && mkdir -p BUILDDIR
+
+# The path used to build the binaries.
+PREFIX="$BUILDDIR"
+
+echo Building $BUILD_TYPE build in $BUILDDIR from $SOURCEDIR
+
+# -----------------------------------------------------------------------------
+# Configure the pkg-config path
+# -----------------------------------------------------------------------------
+
+#WGET="wget -c --quiet"
+
+#TOOLCHAIN_TRIPLET="$TARGET-w64-mingw32.static.posix"
+#P="$PREFIX/lib/pkgconfig"
+#P2="/usr/$TOOLCHAIN_TRIPLET/lib/pkgconfig"
+
+#if [ $TARGET = "i686" ]; then
+#	export PKG_CONFIG_PATH_i686_w64_mingw32_static_posix="$P:$P2"
+#else
+#	export PKG_CONFIG_PATH_x86_64_w64_mingw32_static_posix="$P:$P2"
+#fi
+
+# -----------------------------------------------------------------------------
+# Configure the SIGROK build flags
+# -----------------------------------------------------------------------------
+
+TC_HOST="$TARGET-PC-mingw64"
+
+C="$C --prefix=$PREFIX CPPFLAGS=-D__printf__=__gnu_printf__"
+L="--build=$TC_HOST --host=$TC_HOST  --target=$TC_HOST --disable-shared --enable-static"
+
+# -----------------------------------------------------------------------------
+# Because glib2 is not reliably findable, point its header files
+# -----------------------------------------------------------------------------
+
+# BWJ to be fixed
+export CFLAGS="$VB -I/mingw64/include/glib-2.0 -I/mingw64/lib/glib-2.0/include"
+#export CFLAGS="$VB"
+
+# -----------------------------------------------------------------------------
+# Build libsigrok4DSL
+# -----------------------------------------------------------------------------
+
+cd $SOURCEDIR/libsigrok4DSL
+echo
+echo
+echo Making "$(pwd)"
+
+# This is used to clean the source dir whenever necessary.
+#./autogen.sh
+#./configure $C $L
+#make distclean
+
+# Make sure autogen and configure are run once
+
+if  test -d $BUILDDIR/libsigrok4DSL
+then
+	cd $BUILDDIR/libsigrok4DSL
+else
+	./autogen.sh
+	mkdir -p $BUILDDIR/libsigrok4DSL
+	cd $BUILDDIR/libsigrok4DSL
+	$SOURCEDIR/libsigrok4DSL/configure $C $L
+fi
+
+$SB make $PARALLEL
+$SB make install $V
+
+# -----------------------------------------------------------------------------
+# Build libsigrokdecode4DSL
+# -----------------------------------------------------------------------------
+
+cd $SOURCEDIR/libsigrokdecode4DSL
+echo
+echo
+echo Making "$(pwd)"
+
+# This is used to clean the source dir whenever necessary.
+#./autogen.sh
+#./configure $C $L
+#make distclean
+
+# Make sure autogen and configure are run once
+
+if  test -d $BUILDDIR/libsigrokdecode4DSL
+then
+	cd $BUILDDIR/libsigrokdecode4DSL
+else
+	./autogen.sh
+	mkdir -p $BUILDDIR/libsigrokdecode4DSL
+	cd $BUILDDIR/libsigrokdecode4DSL
+	$SOURCEDIR/libsigrokdecode4DSL/configure $C $L
+fi
+
+$SB make $PARALLEL
+$SB make install $V
+
+# -----------------------------------------------------------------------------
+# Build DSView
+# -----------------------------------------------------------------------------
+
+# Go to the build root
+cd $BUILDDIR
+
+echo
+echo
+echo Making "$SOURCEDIR/DSView"
+
+#MVERB=" V=1 VERBOSE=1"
+#VERB="-v"
+#LVERB="-v"
+NODEP="-Wno-deprecated"
+#LIBFILEFLAGS="-l$PREFIX/lib/sigrok4DSL.a -l$PREFIX/lib/sigrokdecode4DSL.a" \
+CXXMAKECFLAGS="$VERB $NODEP $LIBFILEFLAGS"
+
+rm -f CMakeCache.txt
+$SB cmake \
+	-G "MSYS Makefiles" \
+	$CMBLD \
+	$CMVB \
+	-DMSYS2=true \
+	-DCMAKE_LIBRARY_PATH="$PREFIX/lib" \
+	-DCMAKE_CXX_FLAGS="$CXXMAKECFLAGS" \
+	-DCMAKE_EXE_LINKER_FLAGS="$LVERB" \
+	$SOURCEDIR/DSView
+
+$SB make $PARALLEL $MVERB
+$SB make install
+# makensis -DHOME=$HOME contrib/sigrok-cli_cross.nsi # TODO
+
+# -----------------------------------------------------------------------------

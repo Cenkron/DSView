@@ -1,0 +1,29 @@
+-------------------------------------------------------------------------------
+README
+-------------------------------------------------------------------------------
+
+These scripts are for compiling DSView and its dependencies for Linux.
+
+Status - Working.
+
+
+
+prepare-dsview       is used to install the required packages to buiild DSView for Ubuntu Linux.
+
+build-debug          is used to initially build a local clone of the git repository in debug mode
+                     and install it for use, or for debugging with GDB or DDD.
+
+                     is also used to rebuild the local clone of the git repository in debug mode
+                     following code changes.
+
+build-debug clean    first deletes the debug build directory, then rebuilds it as build-debug does
+
+build-release        is used to initially build a local clone of the git repository in release mode
+                     and install it for use.
+
+                     is also used to rebuild the local clone of the git repository in release mode
+                     following code changes.
+
+build-release clean  first deletes the release build directory, then rebuilds it as build-release does
+
+

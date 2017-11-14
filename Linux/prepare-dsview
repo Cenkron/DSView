@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# Install the requirements for building DSView on Ubuntu
+sudo apt-get install \
+	git-core build-essential cmake autoconf automake libtool pkg-config \
+	check libfftw3-dev python3-dev qt5-default \
+	libglib2.0-dev libzip-dev libudev-dev libusb-1.0-0-dev \
+	libboost-dev libboost-test-dev libboost-thread-dev libboost-system-dev libboost-filesystem-dev

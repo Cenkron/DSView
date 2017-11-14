@@ -1,0 +1,44 @@
+#!/bin/bash
+##
+## This file is part of the DSView project.
+##
+## Copyright (C) 2016 Uwe Hermann <uwe@hermann-uwe.de>
+##
+## This program is free software; you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation; either version 2 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, see <http://www.gnu.org/licenses/>.
+##
+
+# -----------------------------------------------------------------------------
+# Location and Buildtype dependent definitions
+# -----------------------------------------------------------------------------
+
+set -e
+
+# The build target: "i686" (32bit) or "x86_64" (64bit).
+TARGET="x86_64"
+
+# -----------------------------------------------------------------------------
+# prepare
+# -----------------------------------------------------------------------------
+
+W="mingw-w64-$TARGET"
+
+# Update package list, install/update all requirements.
+pacman -Sy
+pacman -S \
+	autoconf automake libtool make pkg-config wget patch \
+	$W-cmake $W-swig $W-toolchain $W-glib2 $W-glibmm $W-libusb \
+	$W-check $W-boost $W-libzip $W-doxygen $W-qt5 $W-fftw \
+	$W-python3 $W-python3-numpy $W-python3-gobject $W-python3-setuptools 
+
+# -----------------------------------------------------------------------------

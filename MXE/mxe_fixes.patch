@@ -1,0 +1,20 @@
+These patches are currently required to get a properly working
+MXE setup for sigrok usage.
+
+ - Force libzip to use its own mkstemp() implementation.
+   http://sigrok.org/bugzilla/show_bug.cgi?id=570#c2
+
+diff --git a/src/libzip.mk b/src/libzip.mk
+index 9d1e189..d4d5bf9 100644
+--- a/src/libzip.mk
++++ b/src/libzip.mk
+@@ -18,7 +18,8 @@ endef
+ 
+ define $(PKG)_BUILD
+     cd '$(1)' && ./configure \
+-        $(MXE_CONFIGURE_OPTS)
++        $(MXE_CONFIGURE_OPTS) \
++        ac_cv_func_mkstemp=no
+     $(MAKE) -C '$(1)' -j '$(JOBS)' install $(MXE_DISABLE_CRUFT) SUBDIRS=lib
+ 
+     '$(TARGET)-gcc' \

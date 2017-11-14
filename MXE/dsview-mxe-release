@@ -1,0 +1,202 @@
+#!/bin/bash
+##
+## This file is part of the DSView project.
+##
+## Copyright (C) 2013-2017 Uwe Hermann <uwe@hermann-uwe.de>
+##
+## This program is free software; you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation; either version 2 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, see <http://www.gnu.org/licenses/>.
+##
+
+set -e
+
+# Edit this to enable/disable debug builds.
+DEBUG=0
+
+# Build target: "i686" (32bit) or "x86_64" (64bit).
+TARGET="i686"
+
+# Edit this to control verbose build output.
+# V="V=1 VERBOSE=1"
+
+# Edit this to enable/disable/modify parallel compiles.
+PARALLEL="-j 2"
+
+# The path where your MXE directory is located.
+MXE=$HOME/mxe-git
+
+# You usually don't need to change anything below this line.
+
+# -----------------------------------------------------------------------------
+
+# Establish the build path
+cd ..
+CWD="$PWD"
+BASEDIR="$CWD"
+
+# Set build type
+if (($DEBUG > 0)); then
+	BUILD_TYPE="Debug"
+	BUILDDIR=$BASEDIR/mxe-debug
+else
+	BUILD_TYPE="Release"
+	BUILDDIR=$BASEDIR/mxe-release
+fi
+
+echo Building in $BUILDDIR from $CWD
+
+# CFLAGS/CXXFLAGS contains "-g" per default for autotools projects in debug mode.
+CM="$CM -DCMAKE_BUILD_TYPE=$BUILD_TYPE"
+
+# -----------------------------------------------------------------------------
+# Force a clean and rebuild by deleting the build directory, if any
+# -----------------------------------------------------------------------------
+
+if [ "x$1" = "xclean" ]; then
+	echo Cleaning the build directory
+	rm -rf $BUILDDIR
+fi
+
+mkdir -p $BUILDDIR
+cd $BUILDDIR
+PREFIX=$BUILDDIR
+
+# -----------------------------------------------------------------------------
+
+WGET="wget -c --quiet"
+GIT_CLONE="git clone --depth=1"
+
+REPO_BASE="git://github.com/Cenkron/DSView"
+
+# -----------------------------------------------------------------------------
+
+# We need to find tools in the MXE toolchain.
+export PATH=$MXE/usr/bin:$PATH
+
+TOOLCHAIN_TRIPLET="$TARGET-w64-mingw32.static.posix"
+
+CMAKE="$TOOLCHAIN_TRIPLET-cmake"
+
+P="$PREFIX/lib/pkgconfig"
+P2="$MXE/usr/$TOOLCHAIN_TRIPLET/lib/pkgconfig"
+C="--host=$TOOLCHAIN_TRIPLET --prefix=$PREFIX CPPFLAGS=-D__printf__=__gnu_printf__"
+L="--disable-shared --enable-static"
+
+if [ $TARGET = "i686" ]; then
+	export PKG_CONFIG_PATH_i686_w64_mingw32_static_posix="$P:$P2"
+else
+	export PKG_CONFIG_PATH_x86_64_w64_mingw32_static_posix="$P:$P2"
+fi
+
+# -----------------------------------------------------------------------------
+
+# The path where to clone the source files for the build.
+CWD="$PWD"
+SOURCEDIR="$CWD/DSView"
+
+# -----------------------------------------------------------------------------
+
+mkdir $SOURCEDIR
+git clone $REPO_BASE $SOURCEDIR
+cd $SOURCEDIR
+
+# Cross-compiling Python is highly non-trivial, so we avoid it for now.
+# The download below is a repackaged tarball of the official Python 3.4.4 MSI
+# installer for Windows:
+#   - https://www.python.org/ftp/python/3.4.4/python-3.4.4.msi
+#   - https://www.python.org/ftp/python/3.4.4/python-3.4.4.amd64.msi
+# The MSI file has been installed on a Windows box and then c:\Python34\libs
+# and c:\Python34\include have been stored in the Python34_*.tar.gz tarball.
+$WGET http://www.sigrok.org/tmp/Python34_$TARGET.tar.gz -O $PREFIX/Python34.tar.gz
+tar xzf $PREFIX/Python34.tar.gz -C $PREFIX
+
+# Create a dummy python3.pc file so that pkg-config finds Python 3.
+echo
+echo
+echo Making Python
+mkdir -p $PREFIX/lib/pkgconfig
+cat >$PREFIX/lib/pkgconfig/python3.pc <<EOF 
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+Name: Python
+Description: Python library
+Version: 3.4
+Libs: $PREFIX/Python34/libs/libpython34.a
+Cflags: -I$PREFIX/Python34/include
+EOF
+
+# The python34.dll and python34.zip files will be shipped in the NSIS
+# Windows installers (required for protocol decoding to work).
+# The file python34.dll (NOT the same as python3.dll) is copied from an
+# installed Python 3.4.4 (see above) from c:\Windows\system32\python34.dll.
+# The file python34.zip contains all files from the 'DLLs', 'Lib', and 'libs'
+# subdirectories from an installed Python on Windows (c:\python34), i.e. some
+# libraries and all Python stdlib modules.
+$WGET http://www.sigrok.org/tmp/python34_$TARGET.dll -O $PREFIX/python34.dll
+$WGET http://www.sigrok.org/tmp/python34_$TARGET.zip -O $PREFIX/python34.zip
+
+# libsigrok4DSL
+echo
+echo
+echo Making libsigrok4DSL
+cd libsigrok4DSL
+./autogen.sh
+./configure $C $L
+make $PARALLEL $V
+echo
+make install $V
+cd ..
+
+# libsigrokdecode4DSL
+echo
+echo
+echo Making libsigrokdecode4DSL
+cd libsigrokdecode4DSL
+./autogen.sh
+./configure $C $L
+make $PARALLEL $V
+make install $V
+cd ..
+
+# -----------------------------------------------------------------------------
+# Build DSView
+# -----------------------------------------------------------------------------
+
+# DSView
+echo
+echo
+echo Making DSView
+cd DSView
+#cp ../../FileAssociation.nsh contrib
+
+if [ $DEBUG = 1 ]; then
+	# Allow a "DOS box" to open on Windows, it'll contain logging output.
+	patch -p1 < ../../pv_mwindows.patch
+fi
+
+$CMAKE \
+	-DMXE=1 \
+	-DCMAKE_INSTALL_PREFIX:PATH=$PREFIX \
+	-DDISABLE_WERROR=y -DENABLE_TESTS=n \
+	.
+
+MAKE $PARALLEL $V
+if [ $DEBUG = 1 ]; then
+	sudo make install $V
+else
+	sudo make install/strip $V
+fi
+makensis -DHOME=$HOME contrib/pulseview_cross.nsi
+cd ../..

@@ -1,0 +1,193 @@
+#!/bin/sh
+##
+## This file is part of the DSView project.
+##
+## Copyright (C) 2013-2017 Uwe Hermann <uwe@hermann-uwe.de>
+##
+## This program is free software; you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation; either version 2 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, see <http://www.gnu.org/licenses/>.
+##
+
+# -----------------------------------------------------------------------------
+# Location and Build type independent definitions
+# -----------------------------------------------------------------------------
+
+set -e
+
+# Edit this to 1/0 to enable/disable debug builds.
+#DEBUG=0
+DEBUG=1
+
+# The build target: "i686" (32bit) or "x86_64" (64bit).
+TARGET="i686"
+#TARGET="x86_64"
+
+# Edit this to control verbose build output for DSView.
+CMVB="-DCMAKE_VERBOSE_MAKEFILE:BOOL=OFF"
+#CMVB="-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON"
+
+# The path where the package will be installed.
+PREFIX=$BUILDDIR/DSView
+
+# Include this (or not) to control verbose build output for the two SIGROK directories.
+VB=""
+#VB="-v"
+
+# Edit this to enable/disable/modify parallel compiles.
+PARALLEL="-j 4"
+#PARALLEL="-j 2"
+
+L="--disable-shared --enable-static"
+
+# You usually don't need to change anything below this line.
+
+# -----------------------------------------------------------------------------
+# Resolve the build path and build type
+# -----------------------------------------------------------------------------
+
+# Move back to the root directory of the DSView git repository.
+cd ..
+CWD="$PWD"
+BASEDIR=$CWD			# Convert it to an absolute path
+SOURCEDIR="$BASEDIR"	# This also the source root directory
+
+# Configure the 32/64 indicator
+if [ $TARGET = "i686" ]; then
+	BUILD_SUFFIX="32"
+else
+	BUILD_SUFFIX="64"
+fi
+
+# Configure the build type and build root directory (out of source).
+if [ $DEBUG = 1 ]; then
+	BUILD_TYPE="Debug"
+	BUILDDIR="$BASEDIR/debug-$BUILD_SUFFIX"
+else
+	BUILD_TYPE="Release"
+	BUILDDIR="$BASEDIR/release-$BUILD_SUFFIX"
+fi
+
+# Configure the cmake parameter for the build type.
+
+CMBLD=" -DCMAKE_BUILD_TYPE=$BUILD_TYPE"
+
+# -----------------------------------------------------------------------------
+# Force a clean and rebuild by deleting the build directory, if any
+# -----------------------------------------------------------------------------
+
+if [ "x$1" = "xclean" ]; then
+	echo Cleaning the build directory
+	sudo rm -rf $BUILDDIR
+fi
+
+# Create the build directory if it does not exist.
+[ ! -f $BUILDDIR ] && mkdir -p BUILDDIR
+
+# The path used to build the binaries.
+PREFIX="$BUILDDIR"
+mkdir -p $BUILDDIR/lib
+
+echo Building $BUILD_TYPE build in $BUILDDIR from $SOURCEDIR
+
+# -----------------------------------------------------------------------------
+# Build libsigrok4DSL
+# -----------------------------------------------------------------------------
+
+cd $SOURCEDIR/libsigrok4DSL
+echo
+echo
+echo Making "$(pwd)"
+
+# This is used to clean the source dir whenever necessary.
+#./autogen.sh
+#./configure $L
+#make distclean
+
+# Make sure autogen and configure are successfully run once
+
+if  test -f $BUILDDIR/libsigrok4DSL/Makefile
+then
+	cd $BUILDDIR/libsigrok4DSL
+else
+	./autogen.sh
+	mkdir -p $BUILDDIR/libsigrok4DSL
+	cd $BUILDDIR/libsigrok4DSL
+	$SOURCEDIR/libsigrok4DSL/configure $L
+fi
+
+make $PARALLEL $VB
+sudo make install $VB
+
+# -----------------------------------------------------------------------------
+# Build libsigrokdecode4DSL
+# -----------------------------------------------------------------------------
+
+cd $SOURCEDIR/libsigrokdecode4DSL
+echo
+echo
+echo Making "$(pwd)"
+
+# This is used to clean the source dir whenever necessary.
+#./autogen.sh
+#./configure $L
+#make distclean
+
+# Make sure autogen and configure are successfully run once
+
+if  test -f $BUILDDIR/libsigrokdecode4DSL/Makefile
+then
+	cd $BUILDDIR/libsigrokdecode4DSL
+else
+	./autogen.sh
+	mkdir -p $BUILDDIR/libsigrokdecode4DSL
+	cd $BUILDDIR/libsigrokdecode4DSL
+	$SOURCEDIR/libsigrokdecode4DSL/configure $L
+fi
+
+make $PARALLEL $VB
+sudo make install $VB
+
+# -----------------------------------------------------------------------------
+# Build DSView
+# -----------------------------------------------------------------------------
+
+# Go to the build root
+cd $BUILDDIR
+
+echo
+echo
+echo Making "$SOURCEDIR/DSView"
+
+#MVERB=" V=1 VERBOSE=1"
+#VERB="-v"
+#LVERB="-v"
+#NODEP="-Wno-deprecated"
+CXXMAKECFLAGS="$VERB $NODEP"
+
+rm -f CMakeCache.txt
+cmake \
+	-DDISABLE_WERROR=y -DENABLE_TESTS=N \
+	$CMBLD \
+	$CMVB \
+	-DCMAKE_CXX_FLAGS="$CXXMAKECFLAGS" \
+	-DCMAKE_EXE_LINKER_FLAGS="$LVERB" \
+	-DCMAKE_INSTALL_PREFIX:PATH=$BUILDDIR \
+	$SOURCEDIR/DSView
+
+
+make $PARALLEL $MVERB
+sudo make install $VB
+# makensis -DHOME=$HOME contrib/sigrok-cli_cross.nsi # TODO
+
+# -----------------------------------------------------------------------------
+

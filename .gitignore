@@ -47,3 +47,11 @@ libsigrok4DSL/version.h
 DSView-prj
 build*
 share
+
+debug
+release
+msys2-debug
+msys2-release
+mxe-debug
+mxe-release
+
